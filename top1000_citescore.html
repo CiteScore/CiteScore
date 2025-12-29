@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -44,7 +45,7 @@
           <th style="min-width:110px;">ISSN-L</th>
           <th class="num" style="min-width:170px;">Citations received in 2025</th>
           <th class="num" style="min-width:170px;">Items published in 2025</th>
-<th class="num" style="min-width:160px;">CiteScore (18-Month)</th>
+<th class="num" style="min-width:160px;">CiteScore (18-Month Scaled)</th>
 </tr>
       </thead>
       <tbody id="tbody">
@@ -63,6 +64,8 @@
 <script>
 (() => {
   const YEAR = 2025;
+  const PREV_YEAR = YEAR - 1;
+  const SCALE_18_OVER_12 = 18/12; // 1.5
   const PER_PAGE = 200;
   const PAGES = 5;      // 200 * 5 = 1000
   const PAGE_SIZE = 100;
@@ -86,9 +89,13 @@
     {
       journal: "Energy Conversions",
       issn_l: "3106-1508",
-      citations: 217,
-      works: 35,
-      annual_if: 6.2000000000,
+      citations_2025: 217,
+      items_2025: 35,
+      citations_2024: 0,
+      items_2024: 0,
+      citations_18m: 217,
+      items_18m: 35,
+      citescore_18m: 9.3,
       id: "manual:energyconversions"
     }
   ];
@@ -99,16 +106,16 @@
 
   function setStatus(msg) { statusEl.textContent = msg; }
 
-  function getYearCounts(countsByYear) {
-    if (!Array.isArray(countsByYear)) return {citations: null, works: null};
-    const y = countsByYear.find(x => x && x.year === YEAR);
-    if (!y) return {citations: null, works: null};
-    return {citations: y.cited_by_count ?? null, works: y.works_count ?? null};
+  function getYearCounts(countsByYear, year, defaultZero=false) {
+    if (!Array.isArray(countsByYear)) return {citations: defaultZero ? 0 : null, works: defaultZero ? 0 : null};
+    const y = countsByYear.find(x => x && x.year === year);
+    if (!y) return {citations: defaultZero ? 0 : null, works: defaultZero ? 0 : null};
+    return {citations: y.cited_by_count ?? (defaultZero ? 0 : null), works: y.works_count ?? (defaultZero ? 0 : null)};
   }
 
-  function computeAnnualIF(citations, works) {
-    if (citations == null || works == null || works === 0) return null;
-    return citations / works;
+  function computeCiteScore18mScaled(citations18m, items18m) {
+    if (citations18m == null || items18m == null || items18m === 0) return null;
+    return (citations18m / items18m) * SCALE_18_OVER_12;
   }
 
   function escapeHtml(s) {
@@ -130,9 +137,9 @@
     const slice = filtered.slice(start, end);
 
     tbody.innerHTML = slice.length ? slice.map(r => {
-      const cs18 = (r.annual_if == null) ? '' : (Number(r.annual_if) * 1.5).toFixed(1);
-      const cit = (r.citations == null) ? '' : r.citations;
-      const works = (r.works == null) ? '' : r.works;
+      const cs18 = (r.citescore_18m == null) ? '' : Number(r.citescore_18m).toFixed(1);
+      const cit = (r.citations_2025 == null) ? '' : r.citations_2025;
+      const works = (r.items_2025 == null) ? '' : r.items_2025;
       return `
         <tr>
           <td>${escapeHtml(r.journal)}</td>
@@ -150,14 +157,19 @@
   }
 
   function toCsv(rows) {
-    const header = ["Journal","ISSN-L","Citations_2025","Items_2025","CiteScore_18m","Source_ID"];
+    const header = ["Journal","ISSN-L","Citations_2025","Items_2025","Citations_2024","Items_2024","Citations_18m","Items_18m","CiteScore_18m_scaled","Source_ID"];
     const lines = [header.join(",")];
     for (const r of rows) {
       const vals = [
         `"${String(r.journal ?? '').replaceAll('"','""')}"`,
         `"${String(r.issn_l ?? '').replaceAll('"','""')}"`,
-        (r.citations ?? ""),
-        (r.works ?? ""),        (r.annual_if == null ? "" : (Number(r.annual_if) * 1.5).toFixed(1)),
+        (r.citations_2025 ?? ""),
+        (r.items_2025 ?? ""),
+        (r.citations_2024 ?? ""),
+        (r.items_2024 ?? ""),
+        (r.citations_18m ?? ""),
+        (r.items_18m ?? ""),
+        (r.citescore_18m == null ? "" : Number(r.citescore_18m).toFixed(1)),
         `"${String(r.id ?? '').replaceAll('"','""')}"`
       ];
       lines.push(vals.join(","));
@@ -171,7 +183,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = "citescore_18m.csv";
+    a.download = "citescore.csv";
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -203,15 +215,24 @@
       for (const s of results) {
         const journal = s.display_name || "";
         const issn_l = s.issn_l || "";
-        const {citations, works} = getYearCounts(s.counts_by_year);
-        const annual_if = computeAnnualIF(citations, works);
+        const {citations: c2025, works: n2025} = getYearCounts(s.counts_by_year, YEAR, false);
+        const {citations: c2024, works: n2024} = getYearCounts(s.counts_by_year, PREV_YEAR, true);
+
+        const citations18 = (c2025 == null) ? null : (c2025 + 0.5 * c2024);
+        const items18     = (n2025 == null) ? null : (n2025 + 0.5 * n2024);
+
+        const citescore_18m = computeCiteScore18mScaled(citations18, items18);
 
         allRows.push({
           journal,
           issn_l,
-          citations: citations ?? null,
-          works: works ?? null,
-          annual_if,
+          citations_2025: c2025,
+          items_2025: n2025,
+          citations_2024: c2024,
+          items_2024: n2024,
+          citations_18m: citations18,
+          items_18m: items18,
+          citescore_18m,
           id: s.id || ""
         });
       }
